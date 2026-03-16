@@ -5,6 +5,9 @@
  * Handles graceful shutdown and database connections.
  */
 
+import * as dotenv from "dotenv";
+dotenv.config();
+
 import { testConnection, closeConnections, pool } from "./db";
 import { runMigrations } from "./migrate";
 import { startServer } from "./server";
