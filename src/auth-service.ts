@@ -157,7 +157,7 @@ class AuthService {
         firstName: firstName || null,
         lastName: lastName || null,
         passwordHash,
-        zkCredentialHash,
+        zkCredentialHash: zkCredentialHash || null,
         isEmailVerified: false,
       });
 
@@ -176,8 +176,8 @@ class AuthService {
       authEvents.userRegistered({
         userId: user.id,
         email,
-        firstName: firstName,
-        lastName: lastName,
+        firstName: firstName || undefined,
+        lastName: lastName || undefined,
       });
 
       return {
@@ -223,7 +223,8 @@ class AuthService {
 
       // Check if user has MFA enabled
       try {
-        const { mfaService } = await import("./mfa");
+        const mfaModule = await import("./mfa");
+        const { mfaService } = mfaModule;
         const requiresMfa = await mfaService.userRequiresMfa(user.id);
 
         if (requiresMfa) {
@@ -251,7 +252,7 @@ class AuthService {
         userId: user.id,
         email: user.email || "",
         method: "password",
-        ip,
+        ip: ip || undefined,
       });
 
       return {
@@ -276,7 +277,7 @@ class AuthService {
       email: user.email || null,
       firstName: user.firstName || null,
       lastName: user.lastName || null,
-      subdomain,
+      subdomain: subdomain || undefined,
       type: "access",
     };
 
@@ -285,7 +286,7 @@ class AuthService {
       email: user.email || null,
       firstName: user.firstName || null,
       lastName: user.lastName || null,
-      subdomain,
+      subdomain: subdomain || undefined,
       type: "refresh",
     };
 
@@ -303,7 +304,7 @@ class AuthService {
     await storage.createRefreshToken({
       userId: user.id,
       tokenHash: refreshTokenHash,
-      subdomain,
+      subdomain: subdomain || null,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
 
@@ -477,7 +478,7 @@ class AuthService {
         userId: user.id,
         email: user.email || "",
         method: "zkp",
-        ip,
+        ip: ip || undefined,
       });
 
       return { success: true, user: this.mapUser(user), accessToken, refreshToken };

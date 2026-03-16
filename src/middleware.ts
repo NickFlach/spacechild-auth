@@ -80,7 +80,7 @@ export function clearAuthRateLimit(identifier: string): void {
 /**
  * Require authentication - returns 401 if not authenticated
  */
-export function isAuthenticated(req: Request, res: Response, next: NextFunction) {
+export function isAuthenticated(req: Request, res: Response, next: NextFunction): any {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -115,7 +115,7 @@ export function isAuthenticated(req: Request, res: Response, next: NextFunction)
 /**
  * Optional authentication - sets req.user if token is present
  */
-export function optionalAuth(req: Request, res: Response, next: NextFunction) {
+export function optionalAuth(req: Request, res: Response, next: NextFunction): any {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -237,7 +237,7 @@ export function isValidSsoCallback(callbackUrl: string): boolean {
 export function getClientIp(req: Request): string {
   const forwarded = req.headers["x-forwarded-for"];
   if (typeof forwarded === "string") {
-    return forwarded.split(",")[0].trim();
+    return forwarded.split(",")[0]?.trim() || "unknown";
   }
   return req.ip || req.socket.remoteAddress || "unknown";
 }

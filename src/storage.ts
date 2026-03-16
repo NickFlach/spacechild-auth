@@ -31,10 +31,10 @@ export class Storage {
   // ============================================
 
   async getUser(id: string): Promise<User | undefined> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.pool.execute(
       'SELECT * FROM users WHERE id = ?',
       [id]
-    );
+    ) as [RowDataPacket[], any];
     return rows[0] as User | undefined;
   }
 
@@ -84,13 +84,13 @@ export class Storage {
       return user;
     } else {
       // Insert new user
-      const [result] = await this.pool.execute<ResultSetHeader>(
+      const [result] = await this.pool.execute(
         `INSERT INTO users (id, email, first_name, last_name, profile_image_url, 
          password_hash, zk_credential_hash, is_email_verified, role, last_login_at)
          VALUES (UUID(), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [email, firstName, lastName, profileImageUrl, passwordHash, zkCredentialHash,
          isEmailVerified, role, lastLoginAt]
-      );
+      ) as [ResultSetHeader, any];
 
       // Get the inserted user
       const [rows] = await this.pool.execute<RowDataPacket[]>(
@@ -150,7 +150,7 @@ export class Storage {
 
     await this.pool.execute(
       `UPDATE users SET ${fields.join(', ')} WHERE id = ?`,
-      values
+      values.filter(v => v !== undefined)
     );
 
     return await this.getUser(id);

@@ -34,7 +34,7 @@ const PENDING_LOGIN_EXPIRY = 5 * 60 * 1000; // 5 minutes
 const ENCRYPTION_ALGORITHM = "aes-256-gcm";
 
 function deriveEncryptionKey(salt: Buffer): Buffer {
-  const secret = process.env.SESSION_SECRET || "";
+  const secret = process.env.SESSION_SECRET;
   if (!secret || secret.length < 32) {
     throw new Error("SESSION_SECRET must be at least 32 characters for MFA encryption");
   }
@@ -343,7 +343,12 @@ class MfaService {
   }> {
     try {
       // Verify partial token
-      const payload = jwt.verify(partialToken, process.env.SESSION_SECRET!, {
+      const secret = process.env.SESSION_SECRET;
+      if (!secret) {
+        return { success: false, error: "Server configuration error" };
+      }
+      
+      const payload = jwt.verify(partialToken, secret, {
         issuer: "spacechild-auth",
       }) as any;
 

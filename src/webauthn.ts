@@ -44,7 +44,7 @@ export interface CredentialInfo {
  * Note: This is a basic implementation for project structure.
  * For production use, implement with @simplewebauthn/server and proper attestation verification.
  */
-export class WebauthnService {
+class WebauthnService {
   private static instance: WebauthnService;
 
   private constructor() {}
@@ -254,6 +254,3 @@ export class WebauthnService {
 
 // Export singleton instance
 export const webauthnService = WebauthnService.getInstance();
-
-// Export class for testing
-export { WebauthnService };

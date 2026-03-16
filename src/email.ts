@@ -24,13 +24,13 @@ function getAppUrl(): string {
 
 const MASCOT_IMAGE_URL = "https://spacechild.love/mascot-email.png";
 
-function createTransporter() {
+function createTransport() {
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) {
     console.warn("Email service not configured - SMTP credentials missing");
     return null;
   }
   
-  return nodemailer.createTransporter({
+  return nodemailer.createTransport({
     host: SMTP_HOST,
     port: SMTP_PORT,
     secure: SMTP_PORT === 465,
@@ -41,7 +41,7 @@ function createTransporter() {
   });
 }
 
-const transporter = createTransporter();
+const transporter = createTransport();
 
 export async function sendVerificationEmail(email: string, token: string, firstName?: string): Promise<boolean> {
   if (!transporter) {
