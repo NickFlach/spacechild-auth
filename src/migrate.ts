@@ -20,12 +20,15 @@ export async function runMigrations(pool: Pool): Promise<void> {
     const schemaPath = path.join(__dirname, 'schema.sql');
     const schemaContent = await fs.readFile(schemaPath, 'utf-8');
 
-    // Split into individual statements
-    const statements = schemaContent
+    // Strip comments, then split into individual statements
+    const cleaned = schemaContent
+      .replace(/\/\*[\s\S]*?\*\//g, '')  // Remove /* ... */ block comments
+      .replace(/--.*$/gm, '');            // Remove -- line comments
+    
+    const statements = cleaned
       .split(';')
       .map(stmt => stmt.trim())
-      .filter(stmt => stmt.length > 0 && !stmt.startsWith('--'))
-      .filter(stmt => !stmt.startsWith('/*')); // Remove comment blocks
+      .filter(stmt => stmt.length > 5);
 
     console.log(`📋 Found ${statements.length} migration statements`);
 
