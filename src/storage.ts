@@ -24,6 +24,21 @@ function sanitizeParams(params: any[]): any[] {
   return params.map(v => v === undefined ? null : v);
 }
 
+/** Convert snake_case DB rows to camelCase for TypeScript types */
+function toCamel(row: any): any {
+  if (!row) return row;
+  const out: any = {};
+  for (const [key, val] of Object.entries(row)) {
+    const camelKey = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+    out[camelKey] = val;
+  }
+  return out;
+}
+
+function toCamelRows<T>(rows: any[]): T[] {
+  return rows.map(toCamel) as T[];
+}
+
 export class Storage {
   private pool: Pool;
 
@@ -33,7 +48,7 @@ export class Storage {
 
   /** Execute with auto-sanitized params (undefined → null) */
   private exec<T extends RowDataPacket[] | ResultSetHeader>(sql: string, params: any[] = []) {
-    return this.exec<T>(sql, sanitizeParams(params));
+    return this.pool.execute<T>(sql, sanitizeParams(params));
   }
 
   // ============================================
@@ -45,7 +60,7 @@ export class Storage {
       'SELECT * FROM users WHERE id = ?',
       [id]
     ) as [RowDataPacket[], any];
-    return rows[0] as User | undefined;
+    return toCamel(rows[0]) as User | undefined;
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
@@ -53,14 +68,14 @@ export class Storage {
       'SELECT * FROM users WHERE email = ?',
       [email]
     );
-    return rows[0] as User | undefined;
+    return toCamel(rows[0]) as User | undefined;
   }
 
   async getAllUsers(): Promise<User[]> {
     const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM users ORDER BY created_at DESC'
     );
-    return rows as User[];
+    return toCamelRows<User>(rows);
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
@@ -120,7 +135,7 @@ export class Storage {
       const [rows] = await this.exec<RowDataPacket[]>(
         'SELECT * FROM users WHERE id = (SELECT id FROM users ORDER BY created_at DESC LIMIT 1)'
       );
-      return rows[0] as User;
+      return toCamel(rows[0]) as User;
     }
   }
 
@@ -189,7 +204,7 @@ export class Storage {
       'SELECT * FROM zk_credentials WHERE id = ?',
       [id]
     );
-    return rows[0] as ZkCredential | undefined;
+    return toCamel(rows[0]) as ZkCredential | undefined;
   }
 
   async getZkCredentialsByUser(userId: string): Promise<ZkCredential[]> {
@@ -197,7 +212,7 @@ export class Storage {
       'SELECT * FROM zk_credentials WHERE user_id = ?',
       [userId]
     );
-    return rows as ZkCredential[];
+    return toCamelRows<ZkCredential>(rows);
   }
 
   async getZkCredentialByCommitment(commitment: string): Promise<ZkCredential | undefined> {
@@ -205,7 +220,7 @@ export class Storage {
       'SELECT * FROM zk_credentials WHERE public_commitment = ?',
       [commitment]
     );
-    return rows[0] as ZkCredential | undefined;
+    return toCamel(rows[0]) as ZkCredential | undefined;
   }
 
   async createZkCredential(credential: InsertZkCredential): Promise<ZkCredential> {
@@ -245,7 +260,7 @@ export class Storage {
       'SELECT * FROM proof_sessions WHERE session_id = ?',
       [sessionId]
     );
-    return rows[0] as ProofSession | undefined;
+    return toCamel(rows[0]) as ProofSession | undefined;
   }
 
   async createProofSession(session: InsertProofSession): Promise<ProofSession> {
@@ -291,7 +306,7 @@ export class Storage {
         'SELECT * FROM proof_sessions WHERE id = ?',
         [id]
       );
-      return rows[0] as ProofSession | undefined;
+      return toCamel(rows[0]) as ProofSession | undefined;
     }
 
     values.push(id);
@@ -305,7 +320,7 @@ export class Storage {
       'SELECT * FROM proof_sessions WHERE id = ?',
       [id]
     );
-    return rows[0] as ProofSession | undefined;
+    return toCamel(rows[0]) as ProofSession | undefined;
   }
 
   // ============================================
@@ -317,7 +332,7 @@ export class Storage {
       'SELECT * FROM refresh_tokens WHERE token_hash = ?',
       [tokenHash]
     );
-    return rows[0] as RefreshToken | undefined;
+    return toCamel(rows[0]) as RefreshToken | undefined;
   }
 
   async getRefreshTokensByUser(userId: string): Promise<RefreshToken[]> {
@@ -325,7 +340,7 @@ export class Storage {
       'SELECT * FROM refresh_tokens WHERE user_id = ? ORDER BY created_at DESC',
       [userId]
     );
-    return rows as RefreshToken[];
+    return toCamelRows<RefreshToken>(rows);
   }
 
   async createRefreshToken(token: InsertRefreshToken): Promise<RefreshToken> {
@@ -347,7 +362,7 @@ export class Storage {
       'SELECT * FROM refresh_tokens WHERE id = ?',
       [result.insertId]
     );
-    return rows[0] as RefreshToken;
+    return toCamel(rows[0]) as RefreshToken;
   }
 
   async revokeRefreshToken(id: number): Promise<void> {
@@ -373,7 +388,7 @@ export class Storage {
       'SELECT * FROM subdomain_access WHERE user_id = ? AND subdomain = ?',
       [userId, subdomain]
     );
-    return rows[0] as SubdomainAccess | undefined;
+    return toCamel(rows[0]) as SubdomainAccess | undefined;
   }
 
   async createSubdomainAccess(access: InsertSubdomainAccess): Promise<SubdomainAccess> {
@@ -392,7 +407,7 @@ export class Storage {
       'SELECT * FROM subdomain_access WHERE id = ?',
       [result.insertId]
     );
-    return rows[0] as SubdomainAccess;
+    return toCamel(rows[0]) as SubdomainAccess;
   }
 
   async updateSubdomainLastAccess(userId: string, subdomain: string): Promise<void> {
@@ -417,7 +432,7 @@ export class Storage {
       'SELECT * FROM email_verification_tokens WHERE id = ?',
       [result.insertId]
     );
-    return rows[0] as EmailVerificationToken;
+    return toCamel(rows[0]) as EmailVerificationToken;
   }
 
   async getEmailVerificationTokenByUser(userId: string): Promise<EmailVerificationToken | undefined> {
@@ -427,7 +442,7 @@ export class Storage {
        ORDER BY sent_at DESC LIMIT 1`,
       [userId]
     );
-    return rows[0] as EmailVerificationToken | undefined;
+    return toCamel(rows[0]) as EmailVerificationToken | undefined;
   }
 
   async consumeEmailVerificationToken(id: number): Promise<void> {
@@ -448,7 +463,7 @@ export class Storage {
     const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM email_verification_tokens WHERE consumed_at IS NULL AND expires_at > NOW()'
     );
-    return rows as EmailVerificationToken[];
+    return toCamelRows<EmailVerificationToken>(rows);
   }
 
   // ============================================
@@ -466,7 +481,7 @@ export class Storage {
       'SELECT * FROM password_reset_tokens WHERE id = ?',
       [result.insertId]
     );
-    return rows[0] as PasswordResetToken;
+    return toCamel(rows[0]) as PasswordResetToken;
   }
 
   async getPasswordResetTokenByUser(userId: string): Promise<PasswordResetToken | undefined> {
@@ -476,7 +491,7 @@ export class Storage {
        ORDER BY created_at DESC LIMIT 1`,
       [userId]
     );
-    return rows[0] as PasswordResetToken | undefined;
+    return toCamel(rows[0]) as PasswordResetToken | undefined;
   }
 
   async consumePasswordResetToken(id: number): Promise<void> {
@@ -497,7 +512,7 @@ export class Storage {
     const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM password_reset_tokens WHERE consumed_at IS NULL AND expires_at > NOW()'
     );
-    return rows as PasswordResetToken[];
+    return toCamelRows<PasswordResetToken>(rows);
   }
 
   // ============================================
@@ -509,7 +524,7 @@ export class Storage {
       'SELECT * FROM mfa_methods WHERE user_id = ? ORDER BY created_at DESC',
       [userId]
     );
-    return rows as MfaMethod[];
+    return toCamelRows<MfaMethod>(rows);
   }
 
   async createMfaMethod(method: InsertMfaMethod): Promise<MfaMethod> {
@@ -522,7 +537,7 @@ export class Storage {
       'SELECT * FROM mfa_methods WHERE id = ?',
       [result.insertId]
     );
-    return rows[0] as MfaMethod;
+    return toCamel(rows[0]) as MfaMethod;
   }
 
   async updateMfaMethodLastUsed(id: number): Promise<void> {
@@ -552,7 +567,7 @@ export class Storage {
       'SELECT * FROM totp_secrets WHERE user_id = ?',
       [userId]
     );
-    return rows[0] as TotpSecret | undefined;
+    return toCamel(rows[0]) as TotpSecret | undefined;
   }
 
   async createTotpSecret(secret: InsertTotpSecret): Promise<TotpSecret> {
@@ -585,7 +600,7 @@ export class Storage {
       'SELECT * FROM webauthn_credentials WHERE user_id = ? ORDER BY created_at DESC',
       [userId]
     );
-    return rows as WebauthnCredential[];
+    return toCamelRows<WebauthnCredential>(rows);
   }
 
   async getWebauthnCredentialById(credentialId: string): Promise<WebauthnCredential | undefined> {
@@ -593,7 +608,7 @@ export class Storage {
       'SELECT * FROM webauthn_credentials WHERE credential_id = ?',
       [credentialId]
     );
-    return rows[0] as WebauthnCredential | undefined;
+    return toCamel(rows[0]) as WebauthnCredential | undefined;
   }
 
   async createWebauthnCredential(credential: InsertWebauthnCredential): Promise<WebauthnCredential> {
@@ -640,7 +655,7 @@ export class Storage {
       'SELECT * FROM mfa_challenges WHERE id = ?',
       [id]
     );
-    return rows[0] as MfaChallenge | undefined;
+    return toCamel(rows[0]) as MfaChallenge | undefined;
   }
 
   async createMfaChallenge(challenge: InsertMfaChallenge): Promise<MfaChallenge> {
@@ -670,7 +685,7 @@ export class Storage {
       'SELECT * FROM mfa_pending_logins WHERE partial_token = ?',
       [partialToken]
     );
-    return rows[0] as MfaPendingLogin | undefined;
+    return toCamel(rows[0]) as MfaPendingLogin | undefined;
   }
 
   async createMfaPendingLogin(pendingLogin: InsertMfaPendingLogin): Promise<MfaPendingLogin> {

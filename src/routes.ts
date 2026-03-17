@@ -70,16 +70,27 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ error: result.error });
     }
 
-    res.json({
+    const response: any = {
+      success: true,
       user: {
         id: result.user?.id,
         email: result.user?.email,
         firstName: result.user?.firstName,
         lastName: result.user?.lastName,
       },
-      requiresVerification: result.requiresVerification,
-      message: "Please check your email to verify your account before logging in.",
-    });
+    };
+
+    if (result.accessToken) {
+      response.accessToken = result.accessToken;
+      response.refreshToken = result.refreshToken;
+    }
+
+    if (result.requiresVerification) {
+      response.requiresVerification = true;
+      response.message = "Please check your email to verify your account before logging in.";
+    }
+
+    res.json(response);
   } catch (error: any) {
     console.error("Registration error:", error);
     res.status(500).json({ error: "Registration failed" });
@@ -135,6 +146,7 @@ router.post("/login", async (req, res) => {
     }
 
     res.json({
+      success: true,
       user: {
         id: result.user?.id,
         email: result.user?.email,

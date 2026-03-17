@@ -133,11 +133,24 @@ class AuthService {
 
       const passwordHash = await this.hashPassword(password);
       const userId = uuidv4();
+
+      // Skip email verification when SMTP is not configured
+      const skipVerification = !process.env.SMTP_HOST;
+
+      // Insert user FIRST (ZK credentials have a FK to users)
+      const user = await storage.upsertUser({
+        id: userId,
+        email,
+        firstName: firstName || null,
+        lastName: lastName || null,
+        passwordHash,
+        zkCredentialHash: null,
+        isEmailVerified: skipVerification,
+      });
       
-      let zkCredentialHash: string | undefined;
+      // Now create ZK credential (user exists, FK satisfied)
       try {
         const { commitment, credentialHash } = await this.generateZkCredential(userId, password + email);
-        zkCredentialHash = credentialHash;
 
         await storage.createZkCredential({
           userId: userId,
@@ -146,31 +159,25 @@ class AuthService {
           credentialHash,
           expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
         });
+
+        // Update user with ZK hash
+        await storage.updateUser(userId, { zkCredentialHash: credentialHash });
       } catch (zkError) {
         console.warn("ZK credential creation failed, continuing without ZKP support:", zkError);
-        zkCredentialHash = undefined;
       }
 
-      const user = await storage.upsertUser({
-        id: userId,
-        email,
-        firstName: firstName || null,
-        lastName: lastName || null,
-        passwordHash,
-        zkCredentialHash: zkCredentialHash || null,
-        isEmailVerified: false,
-      });
+      if (!skipVerification) {
+        // Generate verification token and send email
+        const verificationToken = uuidv4();
+        const tokenHash = await this.hashPassword(verificationToken);
+        await storage.createEmailVerificationToken({
+          userId: user.id,
+          tokenHash,
+          expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_EXPIRY),
+        });
 
-      // Generate verification token and send email
-      const verificationToken = uuidv4();
-      const tokenHash = await this.hashPassword(verificationToken);
-      await storage.createEmailVerificationToken({
-        userId: user.id,
-        tokenHash,
-        expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_EXPIRY),
-      });
-
-      await sendVerificationEmail(email, verificationToken, firstName);
+        await sendVerificationEmail(email, verificationToken, firstName);
+      }
 
       // Emit registration event
       authEvents.userRegistered({
@@ -179,6 +186,17 @@ class AuthService {
         firstName: firstName || undefined,
         lastName: lastName || undefined,
       });
+
+      // Auto-login if verification is skipped
+      if (skipVerification) {
+        const { accessToken, refreshToken } = await this.generateTokens(user);
+        return {
+          success: true,
+          user: this.mapUser(user),
+          accessToken,
+          refreshToken,
+        };
+      }
 
       return {
         success: true,
