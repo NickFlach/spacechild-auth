@@ -19,6 +19,11 @@ import type {
 /**
  * Storage implementation with raw MySQL queries
  */
+/** Convert undefined values to null for mysql2 compatibility */
+function sanitizeParams(params: any[]): any[] {
+  return params.map(v => v === undefined ? null : v);
+}
+
 export class Storage {
   private pool: Pool;
 
@@ -26,12 +31,17 @@ export class Storage {
     this.pool = dbPool;
   }
 
+  /** Execute with auto-sanitized params (undefined → null) */
+  private exec<T extends RowDataPacket[] | ResultSetHeader>(sql: string, params: any[] = []) {
+    return this.exec<T>(sql, sanitizeParams(params));
+  }
+
   // ============================================
   // USERS
   // ============================================
 
   async getUser(id: string): Promise<User | undefined> {
-    const [rows] = await this.pool.execute(
+    const [rows] = await this.exec(
       'SELECT * FROM users WHERE id = ?',
       [id]
     ) as [RowDataPacket[], any];
@@ -39,7 +49,7 @@ export class Storage {
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM users WHERE email = ?',
       [email]
     );
@@ -47,7 +57,7 @@ export class Storage {
   }
 
   async getAllUsers(): Promise<User[]> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM users ORDER BY created_at DESC'
     );
     return rows as User[];
@@ -67,33 +77,47 @@ export class Storage {
       lastLoginAt
     } = userData;
 
+    // mysql2 requires null not undefined
+    const n = (v: any) => v === undefined ? null : v;
+
     if (id) {
-      // Update existing user
-      await this.pool.execute(
-        `UPDATE users SET 
-         email = ?, first_name = ?, last_name = ?, profile_image_url = ?,
-         password_hash = ?, zk_credential_hash = ?, is_email_verified = ?,
-         role = ?, last_login_at = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-        [email, firstName, lastName, profileImageUrl, passwordHash, zkCredentialHash,
-         isEmailVerified, role, lastLoginAt, id]
-      );
+      // Check if user exists — upsert means insert or update
+      const existing = await this.getUser(id);
+      if (existing) {
+        await this.exec(
+          `UPDATE users SET 
+           email = ?, first_name = ?, last_name = ?, profile_image_url = ?,
+           password_hash = ?, zk_credential_hash = ?, is_email_verified = ?,
+           role = ?, last_login_at = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [n(email), n(firstName), n(lastName), n(profileImageUrl), n(passwordHash), n(zkCredentialHash),
+           n(isEmailVerified) ?? false, n(role) ?? 'user', n(lastLoginAt), id]
+        );
+      } else {
+        await this.exec(
+          `INSERT INTO users (id, email, first_name, last_name, profile_image_url, 
+           password_hash, zk_credential_hash, is_email_verified, role, last_login_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, n(email), n(firstName), n(lastName), n(profileImageUrl), n(passwordHash), n(zkCredentialHash),
+           n(isEmailVerified) ?? false, n(role) ?? 'user', n(lastLoginAt)]
+        );
+      }
       
       const user = await this.getUser(id);
-      if (!user) throw new Error('User not found after update');
+      if (!user) throw new Error('User not found after upsert');
       return user;
     } else {
       // Insert new user
-      const [result] = await this.pool.execute(
+      const [result] = await this.exec(
         `INSERT INTO users (id, email, first_name, last_name, profile_image_url, 
          password_hash, zk_credential_hash, is_email_verified, role, last_login_at)
          VALUES (UUID(), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [email, firstName, lastName, profileImageUrl, passwordHash, zkCredentialHash,
-         isEmailVerified, role, lastLoginAt]
+        [n(email), n(firstName), n(lastName), n(profileImageUrl), n(passwordHash), n(zkCredentialHash),
+         n(isEmailVerified) ?? false, n(role) ?? 'user', n(lastLoginAt)]
       ) as [ResultSetHeader, any];
 
       // Get the inserted user
-      const [rows] = await this.pool.execute<RowDataPacket[]>(
+      const [rows] = await this.exec<RowDataPacket[]>(
         'SELECT * FROM users WHERE id = (SELECT id FROM users ORDER BY created_at DESC LIMIT 1)'
       );
       return rows[0] as User;
@@ -148,7 +172,7 @@ export class Storage {
     fields.push('updated_at = CURRENT_TIMESTAMP');
     values.push(id);
 
-    await this.pool.execute(
+    await this.exec(
       `UPDATE users SET ${fields.join(', ')} WHERE id = ?`,
       values.filter(v => v !== undefined)
     );
@@ -161,7 +185,7 @@ export class Storage {
   // ============================================
 
   async getZkCredential(id: number): Promise<ZkCredential | undefined> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM zk_credentials WHERE id = ?',
       [id]
     );
@@ -169,7 +193,7 @@ export class Storage {
   }
 
   async getZkCredentialsByUser(userId: string): Promise<ZkCredential[]> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM zk_credentials WHERE user_id = ?',
       [userId]
     );
@@ -177,7 +201,7 @@ export class Storage {
   }
 
   async getZkCredentialByCommitment(commitment: string): Promise<ZkCredential | undefined> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM zk_credentials WHERE public_commitment = ?',
       [commitment]
     );
@@ -185,7 +209,7 @@ export class Storage {
   }
 
   async createZkCredential(credential: InsertZkCredential): Promise<ZkCredential> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    const [result] = await this.exec<ResultSetHeader>(
       `INSERT INTO zk_credentials (user_id, credential_type, public_commitment, 
        credential_hash, expires_at, is_revoked, metadata)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -206,7 +230,7 @@ export class Storage {
   }
 
   async revokeZkCredential(id: number): Promise<void> {
-    await this.pool.execute(
+    await this.exec(
       'UPDATE zk_credentials SET is_revoked = 1 WHERE id = ?',
       [id]
     );
@@ -217,7 +241,7 @@ export class Storage {
   // ============================================
 
   async getProofSession(sessionId: string): Promise<ProofSession | undefined> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM proof_sessions WHERE session_id = ?',
       [sessionId]
     );
@@ -225,7 +249,7 @@ export class Storage {
   }
 
   async createProofSession(session: InsertProofSession): Promise<ProofSession> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    const [result] = await this.exec<ResultSetHeader>(
       `INSERT INTO proof_sessions (session_id, user_id, challenge, proof_type, 
        status, expires_at, verified_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -263,7 +287,7 @@ export class Storage {
     }
 
     if (fields.length === 0) {
-      const [rows] = await this.pool.execute<RowDataPacket[]>(
+      const [rows] = await this.exec<RowDataPacket[]>(
         'SELECT * FROM proof_sessions WHERE id = ?',
         [id]
       );
@@ -272,12 +296,12 @@ export class Storage {
 
     values.push(id);
 
-    await this.pool.execute(
+    await this.exec(
       `UPDATE proof_sessions SET ${fields.join(', ')} WHERE id = ?`,
       values
     );
 
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM proof_sessions WHERE id = ?',
       [id]
     );
@@ -289,7 +313,7 @@ export class Storage {
   // ============================================
 
   async getRefreshToken(tokenHash: string): Promise<RefreshToken | undefined> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM refresh_tokens WHERE token_hash = ?',
       [tokenHash]
     );
@@ -297,7 +321,7 @@ export class Storage {
   }
 
   async getRefreshTokensByUser(userId: string): Promise<RefreshToken[]> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM refresh_tokens WHERE user_id = ? ORDER BY created_at DESC',
       [userId]
     );
@@ -305,7 +329,7 @@ export class Storage {
   }
 
   async createRefreshToken(token: InsertRefreshToken): Promise<RefreshToken> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    const [result] = await this.exec<ResultSetHeader>(
       `INSERT INTO refresh_tokens (user_id, token_hash, device_info, subdomain, 
        expires_at, is_revoked)
        VALUES (?, ?, ?, ?, ?, ?)`,
@@ -319,7 +343,7 @@ export class Storage {
       ]
     );
 
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM refresh_tokens WHERE id = ?',
       [result.insertId]
     );
@@ -327,14 +351,14 @@ export class Storage {
   }
 
   async revokeRefreshToken(id: number): Promise<void> {
-    await this.pool.execute(
+    await this.exec(
       'UPDATE refresh_tokens SET is_revoked = 1 WHERE id = ?',
       [id]
     );
   }
 
   async revokeAllUserRefreshTokens(userId: string): Promise<void> {
-    await this.pool.execute(
+    await this.exec(
       'UPDATE refresh_tokens SET is_revoked = 1 WHERE user_id = ?',
       [userId]
     );
@@ -345,7 +369,7 @@ export class Storage {
   // ============================================
 
   async getSubdomainAccess(userId: string, subdomain: string): Promise<SubdomainAccess | undefined> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM subdomain_access WHERE user_id = ? AND subdomain = ?',
       [userId, subdomain]
     );
@@ -353,7 +377,7 @@ export class Storage {
   }
 
   async createSubdomainAccess(access: InsertSubdomainAccess): Promise<SubdomainAccess> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    const [result] = await this.exec<ResultSetHeader>(
       `INSERT INTO subdomain_access (user_id, subdomain, last_access_at, access_level)
        VALUES (?, ?, ?, ?)`,
       [
@@ -364,7 +388,7 @@ export class Storage {
       ]
     );
 
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM subdomain_access WHERE id = ?',
       [result.insertId]
     );
@@ -372,7 +396,7 @@ export class Storage {
   }
 
   async updateSubdomainLastAccess(userId: string, subdomain: string): Promise<void> {
-    await this.pool.execute(
+    await this.exec(
       'UPDATE subdomain_access SET last_access_at = CURRENT_TIMESTAMP WHERE user_id = ? AND subdomain = ?',
       [userId, subdomain]
     );
@@ -383,13 +407,13 @@ export class Storage {
   // ============================================
 
   async createEmailVerificationToken(token: InsertEmailVerificationToken): Promise<EmailVerificationToken> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    const [result] = await this.exec<ResultSetHeader>(
       `INSERT INTO email_verification_tokens (user_id, token_hash, expires_at, consumed_at)
        VALUES (?, ?, ?, ?)`,
       [token.userId, token.tokenHash, token.expiresAt, token.consumedAt || null]
     );
 
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM email_verification_tokens WHERE id = ?',
       [result.insertId]
     );
@@ -397,7 +421,7 @@ export class Storage {
   }
 
   async getEmailVerificationTokenByUser(userId: string): Promise<EmailVerificationToken | undefined> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       `SELECT * FROM email_verification_tokens 
        WHERE user_id = ? AND consumed_at IS NULL AND expires_at > NOW()
        ORDER BY sent_at DESC LIMIT 1`,
@@ -407,21 +431,21 @@ export class Storage {
   }
 
   async consumeEmailVerificationToken(id: number): Promise<void> {
-    await this.pool.execute(
+    await this.exec(
       'UPDATE email_verification_tokens SET consumed_at = CURRENT_TIMESTAMP WHERE id = ?',
       [id]
     );
   }
 
   async invalidateUserVerificationTokens(userId: string): Promise<void> {
-    await this.pool.execute(
+    await this.exec(
       'UPDATE email_verification_tokens SET consumed_at = CURRENT_TIMESTAMP WHERE user_id = ?',
       [userId]
     );
   }
 
   async findActiveVerificationTokens(): Promise<EmailVerificationToken[]> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM email_verification_tokens WHERE consumed_at IS NULL AND expires_at > NOW()'
     );
     return rows as EmailVerificationToken[];
@@ -432,13 +456,13 @@ export class Storage {
   // ============================================
 
   async createPasswordResetToken(token: InsertPasswordResetToken): Promise<PasswordResetToken> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    const [result] = await this.exec<ResultSetHeader>(
       `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, consumed_at)
        VALUES (?, ?, ?, ?)`,
       [token.userId, token.tokenHash, token.expiresAt, token.consumedAt || null]
     );
 
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM password_reset_tokens WHERE id = ?',
       [result.insertId]
     );
@@ -446,7 +470,7 @@ export class Storage {
   }
 
   async getPasswordResetTokenByUser(userId: string): Promise<PasswordResetToken | undefined> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       `SELECT * FROM password_reset_tokens 
        WHERE user_id = ? AND consumed_at IS NULL AND expires_at > NOW()
        ORDER BY created_at DESC LIMIT 1`,
@@ -456,21 +480,21 @@ export class Storage {
   }
 
   async consumePasswordResetToken(id: number): Promise<void> {
-    await this.pool.execute(
+    await this.exec(
       'UPDATE password_reset_tokens SET consumed_at = CURRENT_TIMESTAMP WHERE id = ?',
       [id]
     );
   }
 
   async invalidateUserPasswordResetTokens(userId: string): Promise<void> {
-    await this.pool.execute(
+    await this.exec(
       'UPDATE password_reset_tokens SET consumed_at = CURRENT_TIMESTAMP WHERE user_id = ?',
       [userId]
     );
   }
 
   async findActiveResetTokens(): Promise<PasswordResetToken[]> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM password_reset_tokens WHERE consumed_at IS NULL AND expires_at > NOW()'
     );
     return rows as PasswordResetToken[];
@@ -481,7 +505,7 @@ export class Storage {
   // ============================================
 
   async getMfaMethodsByUser(userId: string): Promise<MfaMethod[]> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM mfa_methods WHERE user_id = ? ORDER BY created_at DESC',
       [userId]
     );
@@ -489,12 +513,12 @@ export class Storage {
   }
 
   async createMfaMethod(method: InsertMfaMethod): Promise<MfaMethod> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    const [result] = await this.exec<ResultSetHeader>(
       'INSERT INTO mfa_methods (user_id, type, name, is_enabled, last_used_at) VALUES (?, ?, ?, ?, ?)',
       [method.userId, method.type, method.name, method.isEnabled ?? true, method.lastUsedAt || null]
     );
 
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM mfa_methods WHERE id = ?',
       [result.insertId]
     );
@@ -502,21 +526,21 @@ export class Storage {
   }
 
   async updateMfaMethodLastUsed(id: number): Promise<void> {
-    await this.pool.execute(
+    await this.exec(
       'UPDATE mfa_methods SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?',
       [id]
     );
   }
 
   async disableMfaMethod(id: number): Promise<void> {
-    await this.pool.execute(
+    await this.exec(
       'UPDATE mfa_methods SET is_enabled = 0 WHERE id = ?',
       [id]
     );
   }
 
   async deleteMfaMethod(id: number): Promise<void> {
-    await this.pool.execute('DELETE FROM mfa_methods WHERE id = ?', [id]);
+    await this.exec('DELETE FROM mfa_methods WHERE id = ?', [id]);
   }
 
   // ============================================
@@ -524,7 +548,7 @@ export class Storage {
   // ============================================
 
   async getTotpSecret(userId: string): Promise<TotpSecret | undefined> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM totp_secrets WHERE user_id = ?',
       [userId]
     );
@@ -532,7 +556,7 @@ export class Storage {
   }
 
   async createTotpSecret(secret: InsertTotpSecret): Promise<TotpSecret> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    const [result] = await this.exec<ResultSetHeader>(
       `INSERT INTO totp_secrets (user_id, encrypted_secret, backup_codes, backup_codes_used)
        VALUES (?, ?, ?, ?)`,
       [
@@ -549,7 +573,7 @@ export class Storage {
   }
 
   async deleteTotpSecret(userId: string): Promise<void> {
-    await this.pool.execute('DELETE FROM totp_secrets WHERE user_id = ?', [userId]);
+    await this.exec('DELETE FROM totp_secrets WHERE user_id = ?', [userId]);
   }
 
   // ============================================
@@ -557,7 +581,7 @@ export class Storage {
   // ============================================
 
   async getWebauthnCredentials(userId: string): Promise<WebauthnCredential[]> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM webauthn_credentials WHERE user_id = ? ORDER BY created_at DESC',
       [userId]
     );
@@ -565,7 +589,7 @@ export class Storage {
   }
 
   async getWebauthnCredentialById(credentialId: string): Promise<WebauthnCredential | undefined> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM webauthn_credentials WHERE credential_id = ?',
       [credentialId]
     );
@@ -573,7 +597,7 @@ export class Storage {
   }
 
   async createWebauthnCredential(credential: InsertWebauthnCredential): Promise<WebauthnCredential> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    const [result] = await this.exec<ResultSetHeader>(
       `INSERT INTO webauthn_credentials (user_id, credential_id, public_key, counter, 
        transports, aaguid, device_type, backed_up, name, last_used_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -597,14 +621,14 @@ export class Storage {
   }
 
   async updateWebauthnCounter(credentialId: string, counter: number): Promise<void> {
-    await this.pool.execute(
+    await this.exec(
       'UPDATE webauthn_credentials SET counter = ?, last_used_at = CURRENT_TIMESTAMP WHERE credential_id = ?',
       [counter, credentialId]
     );
   }
 
   async deleteWebauthnCredential(id: number): Promise<void> {
-    await this.pool.execute('DELETE FROM webauthn_credentials WHERE id = ?', [id]);
+    await this.exec('DELETE FROM webauthn_credentials WHERE id = ?', [id]);
   }
 
   // ============================================
@@ -612,7 +636,7 @@ export class Storage {
   // ============================================
 
   async getMfaChallenge(id: number): Promise<MfaChallenge | undefined> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM mfa_challenges WHERE id = ?',
       [id]
     );
@@ -620,7 +644,7 @@ export class Storage {
   }
 
   async createMfaChallenge(challenge: InsertMfaChallenge): Promise<MfaChallenge> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    const [result] = await this.exec<ResultSetHeader>(
       'INSERT INTO mfa_challenges (user_id, challenge, type, expires_at, used_at) VALUES (?, ?, ?, ?, ?)',
       [challenge.userId, challenge.challenge, challenge.type, challenge.expiresAt, challenge.usedAt || null]
     );
@@ -631,7 +655,7 @@ export class Storage {
   }
 
   async consumeMfaChallenge(id: number): Promise<void> {
-    await this.pool.execute(
+    await this.exec(
       'UPDATE mfa_challenges SET used_at = CURRENT_TIMESTAMP WHERE id = ?',
       [id]
     );
@@ -642,7 +666,7 @@ export class Storage {
   // ============================================
 
   async getMfaPendingLogin(partialToken: string): Promise<MfaPendingLogin | undefined> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.exec<RowDataPacket[]>(
       'SELECT * FROM mfa_pending_logins WHERE partial_token = ?',
       [partialToken]
     );
@@ -650,7 +674,7 @@ export class Storage {
   }
 
   async createMfaPendingLogin(pendingLogin: InsertMfaPendingLogin): Promise<MfaPendingLogin> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    const [result] = await this.exec<ResultSetHeader>(
       `INSERT INTO mfa_pending_logins (user_id, partial_token, required_methods, 
        expires_at, completed_at) VALUES (?, ?, ?, ?, ?)`,
       [
@@ -668,7 +692,7 @@ export class Storage {
   }
 
   async completeMfaPendingLogin(id: number): Promise<void> {
-    await this.pool.execute(
+    await this.exec(
       'UPDATE mfa_pending_logins SET completed_at = CURRENT_TIMESTAMP WHERE id = ?',
       [id]
     );
