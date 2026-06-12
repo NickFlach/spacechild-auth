@@ -11,6 +11,7 @@ dotenv.config();
 import { testConnection, closeConnections, pool } from "./db";
 import { runMigrations } from "./migrate";
 import { startServer } from "./server";
+import { initFluxPublisher } from "./flux-publisher";
 
 /**
  * Initialize and start the application
@@ -30,6 +31,9 @@ async function main() {
     // Start the HTTP server
     console.log("🚀 Starting HTTP server...");
     startServer();
+
+    // Optional: forward auth events to Flux (no-op unless FLUX_URL is set)
+    initFluxPublisher();
     
     console.log("✅ SpaceChild Auth service started successfully!");
     
